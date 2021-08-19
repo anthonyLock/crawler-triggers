@@ -1,6 +1,7 @@
 import os
 import logging 
 import glue
+import sys
 
 region = os.environ["AWS_REGION"]
 glue_crawler_role = os.environ["AWS_GLUE_ROLE"]
@@ -26,4 +27,7 @@ def handler(event, context = {}):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    handler({})
+    handler({
+        "s3_bucket":sys.argv[1],
+        "new_bucket": True
+    })
