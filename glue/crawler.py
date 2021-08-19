@@ -8,11 +8,22 @@ class Crawler:
     Glue is the class that will deal with all the glue requests for AWS
     """
 
-    def __init__(self, region:str, glue_crawler_name:str, s3_bucket:str, new_partition:bool):
+    def __init__(self,
+                env:str,
+                region:str,
+                glue_role:str,
+                glue_database:str,
+                s3_bucket:str,
+                new_partition:bool,
+                new_bucket:bool):
         self.client = boto3.client("glue", region_name=region)
-        self.glue_crawler_name = glue_crawler_name
+        self.glue_crawler_name = s3_bucket
         self.s3_bucket = s3_bucket
         self.new_partition = new_partition
+        self.new_bucket = new_bucket
+        self.glue_role = glue_role
+        self.glue_database = glue_database
+        self.env = env
 
     def __wait_for_crawler_to_be_ready(self):
         ready = False
@@ -49,32 +60,28 @@ class Crawler:
                 raise RuntimeError(f"Failed to stop crawler {self.glue_crawler_name} - {e}")
         
         self.__wait_for_crawler_to_be_ready()
-
-    def __get_crawlers_s3_buckers(self) -> list:
+   
+    def __create_new_crawler(self):
         try: 
-            response = self.client.get_crawler(
-                Name=self.glue_crawler_name
-            )
-            return list(response["Crawler"]["Targets"]["S3Targets"])
-        except Exception as e:
-            raise RuntimeError(f"Failed get state of crawler  {self.glue_crawler_name} - {e}") 
-
-
-        
-    def __add_s3_to_crawler(self):
-        try: 
-            s3_buckets = self.__get_crawlers_s3_buckers()
-            s3_buckets.append({
-                "Path": self.s3_bucket
-            })
-            self.client.update_crawler(
+            self.client.create_crawler(
                 Name=self.glue_crawler_name,
+                Role=self.glue_role,
+                DatabaseName=self.glue_database,
                 Targets={
-                    "S3Targets": s3_buckets
+                    "S3Targets": [{
+                        "Path": "s3://" + self.s3_bucket + "/"
+                    }]
+                },
+                Tags={
+                    "Environment": self.env,
+                    "ProjectCode": "DEV-WM2DATAPLAT",
+                    "ProductCode": "LDP Integration",
+                    "BusinessUnit": "woodmac",
+                    "Contact": "LensDataTechnologyPlatform@verisk.onmicrosoft.com"
                 }
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to update crawler  {self.glue_crawler_name} - {e}")
+            raise RuntimeError(f"Failed to create crawler  {self.glue_crawler_name} - {e}")
     
     def __start_crawler(self): 
         try: 
@@ -85,12 +92,12 @@ class Crawler:
             raise RuntimeError(f"Failed to start crawler  {self.glue_crawler_name} - {e}")
 
     def run(self):
-        if (not self.new_partition and self.s3_bucket == "" ): 
+        if (not self.new_partition and not self.new_bucket ): 
             return
 
-        self.__stop_glue_crawler()
+        if self.new_bucket:
+            self.__create_new_crawler()
 
-        if self.s3_bucket != "":
-            self.__add_s3_to_crawler()
+        self.__stop_glue_crawler()
 
         self.__start_crawler()

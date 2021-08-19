@@ -9,173 +9,131 @@ class TestCrawler(unittest.TestCase):
         """
         Test that the constructor saves the correct outcomes. 
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new-bucket", False)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, True)
 
-        assert crawler.new_partition == False
-        assert crawler.glue_crawler_name == "test-crawler"
-        assert crawler.s3_bucket == "new-bucket"
+        self.assertEqual(crawler.glue_crawler_name, "glue_s3_bucket")
+        self.assertEqual(crawler.s3_bucket, "glue_s3_bucket")
+        self.assertEqual(crawler.new_partition, True)
+        self.assertEqual(crawler.new_bucket, True)
+        self.assertEqual(crawler.glue_role, "glue_role")
+        self.assertEqual(crawler.glue_database, "glue_db")
+        self.assertEqual(crawler.env, "dev")
 
 class TestCrawlerRun(unittest.TestCase):    
     def test_run_do_not_start(self):
         """
         No New s3 bucket and no new partitions so no crawler activity needed 
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "", False)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", False, False)
         with mock.patch.object( crawler, "_Crawler__stop_glue_crawler") as stop_glue_crawler_func, \
             mock.patch.object( crawler, "_Crawler__start_crawler") as start_crawler_func, \
-            mock.patch.object( crawler, "_Crawler__add_s3_to_crawler") as add_s3_to_crawler_func :                
+            mock.patch.object( crawler, "_Crawler__create_new_crawler") as create_new_crawler_func :                
             
             crawler.run()
             stop_glue_crawler_func.assert_not_called()
-            add_s3_to_crawler_func.assert_not_called()
+            create_new_crawler_func.assert_not_called()
             start_crawler_func.assert_not_called()
 
     def test_run_do_not_add_s3_bucket(self):
         """
         No New s3 bucket and But new partitions so crawler needs to be restarted 
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         with mock.patch.object( crawler, "_Crawler__stop_glue_crawler") as stop_glue_crawler_func, \
             mock.patch.object( crawler, "_Crawler__start_crawler") as start_crawler_func, \
-            mock.patch.object( crawler, "_Crawler__add_s3_to_crawler") as add_s3_to_crawler_func :                
+            mock.patch.object( crawler, "_Crawler__create_new_crawler") as create_new_crawler_func :                
             
             crawler.run()
-            add_s3_to_crawler_func.assert_not_called()
+            create_new_crawler_func.assert_not_called()
             stop_glue_crawler_func.assert_called_once()
             start_crawler_func.assert_called_once()
 
     def test_run_add_s3_bucket(self):
         """
-        New s3 bucket and But new partitions so crawler needs to be restarted 
+        New s3 bucket and new partitions so crawler needs to be restarted 
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, True)
         with mock.patch.object( crawler, "_Crawler__stop_glue_crawler") as stop_glue_crawler_func, \
             mock.patch.object( crawler, "_Crawler__start_crawler") as start_crawler_func, \
-            mock.patch.object( crawler, "_Crawler__add_s3_to_crawler") as add_s3_to_crawler_func :                
+            mock.patch.object( crawler, "_Crawler__create_new_crawler") as create_new_crawler_func :                
             
             crawler.run()
-            add_s3_to_crawler_func.assert_called_once()
+            create_new_crawler_func.assert_called_once()
             stop_glue_crawler_func.assert_called_once()
             start_crawler_func.assert_called_once()            
     
-class TestCrawlerAddS3Buckets(unittest.TestCase):    
-    def test_add_s3_to_crawler(self):
+class TestCrawlerCreateCrawler(unittest.TestCase):    
+    def test_create_crawler_happy_path(self):
         """
-        Test adding the s3 bucket from the event to the crawler 
+        Test calling __create_new_crawler happy path
         """
-        s3_bucket_retrun = [
-            {
-                "Path": "s3_bucket1",
-            },
-            {
-                "Path": "s3_bucket2",
-            }
-        ]
-        s3_bucket_expected = {"S3Targets":[
-            {
-                "Path": "s3_bucket1",
-            },
-            {
-                "Path": "s3_bucket2",
-            },
-            {
-                "Path": "new_s3_bucket",
-            },
-        ]}
-        
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
-        with mock.patch.object( crawler, "_Crawler__get_crawlers_s3_buckers", return_value=s3_bucket_retrun) as get_crawlers_s3_buckers, \
-            mock.patch.object( crawler.client, "update_crawler") as update_crawler:
-            crawler._Crawler__add_s3_to_crawler()
-            get_crawlers_s3_buckers.assert_called_once()
-            update_crawler.assert_called_once_with(Name="test-crawler", Targets=s3_bucket_expected)
-
-    def test_add_s3_to_crawler_update_fail(self):
-        """
-        Test adding the s3 bucket from the event to the crawler 
-        """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
-        stubber.add_client_error("update_crawler", service_error_code ="UpdateCrawlerFailed", service_message="aws-fail")
+        stubber.add_response("create_crawler", {}, 
+        {
+            "Name":"glue_s3_bucket",
+            "Role": "glue_role",
+            "DatabaseName": "glue_db",
+            "Targets": {
+                "S3Targets": [{
+                    "Path": "s3://glue_s3_bucket/"
+                }]
+            },
+            "Tags": {
+                "Environment": "dev",
+                "ProjectCode": "DEV-WM2DATAPLAT",
+                "ProductCode": "LDP Integration",
+                "BusinessUnit": "woodmac",
+                "Contact": "LensDataTechnologyPlatform@verisk.onmicrosoft.com"
+            }
+        })
+        with stubber:
+            crawler._Crawler__create_new_crawler()    
+
+    def test_create_crawler_fail(self):
+        """
+        Test calling __create_new_crawler fail.   
+        """
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
+        stubber = Stubber(crawler.client)
+        stubber.add_client_error("create_crawler", service_error_code ="CreateCrawlerFailed", service_message="aws-fail")
         with stubber,\
-        mock.patch.object( crawler, "_Crawler__get_crawlers_s3_buckers", return_value=[]) as get_crawlers_s3_buckers,\
         self.assertRaises(RuntimeError) as cm:
-            crawler._Crawler__add_s3_to_crawler()
-        self.assertEqual(cm.exception.__str__(), 'Failed to update crawler  test-crawler - An error occurred (UpdateCrawlerFailed) when calling the UpdateCrawler operation: aws-fail')         
-        
+            crawler._Crawler__create_new_crawler()
+        self.assertEqual(cm.exception.__str__(), 'Failed to create crawler  glue_s3_bucket - An error occurred (CreateCrawlerFailed) when calling the CreateCrawler operation: aws-fail')         
+
 
 class TestCrawlerStartCrawler(unittest.TestCase):    
     def test_start_crawler_pass(self):
         """
         Test to check the happy path of start crawler  
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         with mock.patch.object( crawler.client, "start_crawler") as start_crawler_func:
             crawler._Crawler__start_crawler()
-            start_crawler_func.assert_called_once_with(Name="test-crawler")    
+            start_crawler_func.assert_called_once_with(Name="glue_s3_bucket")    
          
 
     def test_start_crawler_fail(self):
         """
         Test to check the error message from the start crawler  
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_client_error("start_crawler", service_error_code ="StartCrawlerFailed", service_message="aws-fail")
         with stubber,\
         self.assertRaises(RuntimeError) as cm:
             crawler._Crawler__start_crawler()
-        self.assertEqual(cm.exception.__str__(), 'Failed to start crawler  test-crawler - An error occurred (StartCrawlerFailed) when calling the StartCrawler operation: aws-fail')         
-
-
-class TestCrawlerGetS3Buckets(unittest.TestCase):    
-    def test_get_s3_buckets_happy_path(self):
-        """
-        Test to check the happy path of get s3 buckets  
-        """
-        s3 =  [
-                {
-                    "Path": "s3_bucket1",
-                },
-                {
-                    "Path": "s3_bucket2",
-                }
-            ]
-        s3_bucket_retrun = {
-            'Crawler': {
-                'Targets': {
-                    "S3Targets": s3
-                }
-            }
-        }
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
-        with mock.patch.object( crawler.client, "get_crawler", return_value = s3_bucket_retrun) as get_crawler_func:
-            res = crawler._Crawler__get_crawlers_s3_buckers()
-            get_crawler_func.assert_called_once_with(Name="test-crawler")
-            self.assertEqual(res, s3)    
-         
-
-    def test_get_s3_buckets_fail(self):
-        """
-        Test to check the error message from get s3 Buckets  
-        """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
-        stubber = Stubber(crawler.client)
-        stubber.add_client_error("get_crawler", service_error_code ="GetCrawlerFailed", service_message="aws-fail")
-        with stubber,\
-        self.assertRaises(RuntimeError) as cm:
-            crawler._Crawler__get_crawlers_s3_buckers()
-        self.assertEqual(cm.exception.__str__(), 'Failed get state of crawler  test-crawler - An error occurred (GetCrawlerFailed) when calling the GetCrawler operation: aws-fail')         
-     
+        self.assertEqual(cm.exception.__str__(), 'Failed to start crawler  glue_s3_bucket - An error occurred (StartCrawlerFailed) when calling the StartCrawler operation: aws-fail')         
 
 class TestCrawlerStopCrawler(unittest.TestCase):    
     def test_stop_crawler_happy_path(self):
         """
         Test calling stop crawler happy path.   
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
-        stubber.add_response("stop_crawler", {}, {"Name":"test-crawler"})
+        stubber.add_response("stop_crawler", {}, {"Name":"glue_s3_bucket"})
         with stubber,\
         mock.patch.object( crawler, "_Crawler__wait_for_crawler_to_be_ready") as wait_for_crawler_func:
             crawler._Crawler__stop_glue_crawler()
@@ -185,7 +143,7 @@ class TestCrawlerStopCrawler(unittest.TestCase):
         """
         Test calling stop crawler when then crawler is not running.   
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_client_error("stop_crawler", service_error_code ="CrawlerNotRunningException")
         with stubber,\
@@ -197,7 +155,7 @@ class TestCrawlerStopCrawler(unittest.TestCase):
         """
         Test calling stop crawler when then crawler is already stopping.   
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_client_error("stop_crawler", service_error_code ="CrawlerStoppingException")
         with stubber,\
@@ -209,7 +167,7 @@ class TestCrawlerStopCrawler(unittest.TestCase):
         """
         Test calling stop crawler fail.   
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_client_error("stop_crawler", service_error_code ="CrawlerStoppingFailed", service_message="aws-fail")
         with stubber,\
@@ -218,20 +176,20 @@ class TestCrawlerStopCrawler(unittest.TestCase):
             crawler._Crawler__stop_glue_crawler()
             wait_for_crawler_func.assert_called_once()
         
-        self.assertEqual(cm.exception.__str__(), 'Failed to stop crawler test-crawler - An error occurred (CrawlerStoppingFailed) when calling the StopCrawler operation: aws-fail')         
+        self.assertEqual(cm.exception.__str__(), 'Failed to stop crawler glue_s3_bucket - An error occurred (CrawlerStoppingFailed) when calling the StopCrawler operation: aws-fail')         
 
 class TestCrawlerIsCrawlerReady(unittest.TestCase):    
     def test_is_crawler_ready_happy_path(self):
         """
         Test calling __is_crawler_ready happy path
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_response("get_crawler", {
             "Crawler": {
                 "State": "READY"
             }
-        }, {"Name":"test-crawler"})
+        }, {"Name":"glue_s3_bucket"})
         with stubber:
             res  = crawler._Crawler__is_crawler_ready()
             self.assertEqual(res, True)
@@ -239,7 +197,7 @@ class TestCrawlerIsCrawlerReady(unittest.TestCase):
             "Crawler": {
                 "State": "RUNNING"
             }
-        }, {"Name":"test-crawler"})
+        }, {"Name":"glue_s3_bucket"})
         with stubber:
             res  = crawler._Crawler__is_crawler_ready()
             self.assertEqual(res, False)            
@@ -247,10 +205,10 @@ class TestCrawlerIsCrawlerReady(unittest.TestCase):
         """
         Test calling __is_crawler_ready fail.   
         """
-        crawler = Crawler("eu-west-1", "test-crawler", "new_s3_bucket", True)
+        crawler = Crawler( "dev", "eu-west-1", "glue_role","glue_db", "glue_s3_bucket", True, False)
         stubber = Stubber(crawler.client)
         stubber.add_client_error("get_crawler", service_error_code ="GetCrawlerFailed", service_message="aws-fail")
         with stubber,\
         self.assertRaises(RuntimeError) as cm:
             crawler._Crawler__is_crawler_ready()
-        self.assertEqual(cm.exception.__str__(), 'Failed get state of crawler  test-crawler - An error occurred (GetCrawlerFailed) when calling the GetCrawler operation: aws-fail')         
+        self.assertEqual(cm.exception.__str__(), 'Failed get state of crawler  glue_s3_bucket - An error occurred (GetCrawlerFailed) when calling the GetCrawler operation: aws-fail')         
